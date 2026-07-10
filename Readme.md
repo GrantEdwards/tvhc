@@ -2,12 +2,12 @@
 
 `tvhc.py` is a TVHeadend client application for watching live TV.
 
-It's a simple tkInter application that uses `mpv` to play lie TV 
+It's a simple tkInter application that uses `mpv` to play live TV 
 streams from a TVHeadend server.
 
 ## Background
 
-Background: I tried and failed get tvhplayer working. It seemed to be
+Background: I tried and failed to get tvhplayer working. It seemed to be
 incompatible with the version of the VLC library on my system, so it
 couldn't play live streams. The recording functions also failed to
 work for reasons I couldn't figure out. I started trying to do some
