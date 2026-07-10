@@ -2,8 +2,8 @@
 
 `tvhc.py` is a TVHeadend client application for watching live TV.
 
-It's a simple tkInter application that uses `mpv` to actually play the
-A/V stream from the TVHeadend server.
+It's a simple tkInter application that uses `mpv` to play lie TV 
+streams from a TVHeadend server.
 
 ## Background
 
