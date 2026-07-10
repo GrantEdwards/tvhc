@@ -24,7 +24,7 @@ There is no building. It's a single Python file `tvhc.py`.
 
 ## Installing
 
-Either put `tvhc.py` it somewhere in your path or invoke it with an
+Either put `tvhc.py` somewhere in your path or invoke it with an
 explicit path.
 
 ## Dependencies
