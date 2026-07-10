@@ -30,7 +30,7 @@ explicit path.
 ## Dependencies
 
 I think the only dependency other than tkInter and the Python standard
-library is the [`requests`
+library is the [requests
 library](https://github.com/psf/requests). Consult your system
 documentation on how to install that.
 
