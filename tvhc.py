@@ -135,11 +135,31 @@ def get_epg_data(fstart=None, fend=None):
             continue
         if fstart and e['stop'] < fstart:
             continue
-        if fend and e.get('start', 0) > fend:
+        if fend and e['start'] > fend:
             break
         channels[key].append(e)
 
     return dict(sorted(channels.items(), key=channel_sort_key))
+
+
+# fetch the full channel list, including channels with no EPG data
+def get_channels():
+    response = requests_get(f'{TVHE_Server}/api/channel/grid?start=0&limit=99999')
+    try:
+        data = response.json()
+    except ValueError as err:
+        raise TVHCError(f'invalid channel response: {err}') from err
+
+    channels = {}
+    for channel in data.get('entries', []):
+        try:
+            key = str(channel['number']), channel['name']
+        except KeyError:
+            continue
+        if not channel.get('enabled', True):
+            continue
+        channels[key] = channel.get('uuid')
+    return channels
 
 
 # ---------------------------------------------------------------- theme ---
@@ -161,7 +181,7 @@ ERROR = "#ff7b72"
 root = tk.Tk()
 root.title("TVHC — TVHeadend Client")
 root.geometry("1020x660")
-root.minsize(800, 420)
+root.minsize(900, 420)
 root.configure(background=BG)
 
 style = ttk.Style(root)
@@ -187,6 +207,13 @@ style.map("TButton",
 style.configure("TEntry", fieldbackground=CELL, foreground=FG,
                 insertcolor=FG, bordercolor=BORDER, padding=4)
 style.map("TEntry", bordercolor=[("focus", ACCENT)])
+style.configure("TCheckbutton", background=BG, foreground=FG,
+                indicatorbackground=CELL, indicatorforeground=ACCENT,
+                focuscolor=ACCENT)
+style.map("TCheckbutton",
+          background=[("active", BG)],
+          indicatorbackground=[("selected", ACCENT), ("active", CELL_HOVER)],
+          indicatorforeground=[("selected", ON_ACCENT)])
 style.configure("Vertical.TScrollbar", background=PANEL, troughcolor=BG,
                 bordercolor=BORDER, arrowcolor=MUTED,
                 darkcolor=BORDER, lightcolor=BORDER)
@@ -209,6 +236,8 @@ style.configure("Prog.TLabel", background=CELL, foreground=FG,
                 padding=(6, 4), bordercolor=BORDER)
 style.configure("ProgHover.TLabel", background=CELL_HOVER, foreground=FG,
                 padding=(6, 4), bordercolor=ACCENT)
+style.configure("Empty.TLabel", background=CELL, foreground=MUTED,
+                padding=(8, 4), bordercolor=BORDER)
 style.configure("Status.TLabel", background=PANEL, foreground=MUTED,
                 padding=(10, 4))
 style.configure("Panel.TFrame", background=PANEL)
@@ -229,21 +258,32 @@ status_right.pack(side="right")
 
 toolbar = ttk.Frame(root, padding=(10, 8, 10, 4))
 toolbar.pack(side="top", fill="x")
+toolbar.columnconfigure(0, weight=0)
+toolbar.columnconfigure(1, weight=1)
+toolbar.columnconfigure(2, weight=0)
 
 search_box = ttk.Frame(toolbar)
-search_box.pack(side="left")
+search_box.grid(row=0, column=0, sticky="w")
 ttk.Label(search_box, text="Search", style="Muted.TLabel").pack(side="left", padx=(0, 6))
 search_var = tk.StringVar()
 search_entry = ttk.Entry(search_box, textvariable=search_var, width=26)
 search_entry.pack(side="left")
 ttk.Button(search_box, text="Clear", command=lambda: search_var.set()).pack(side="left", padx=(6, 0))
 
-clock_label = ttk.Label(toolbar, text="", style="Bold.TLabel")
+epg_only_var = tk.BooleanVar(value=False)
+epg_only_check = ttk.Checkbutton(toolbar, text="Only channels with EPG",
+                                 variable=epg_only_var)
+epg_only_check.grid(row=0, column=1)
+
+right_box = ttk.Frame(toolbar)
+right_box.grid(row=0, column=2, sticky="e")
+
+clock_label = ttk.Label(right_box, text="", style="Bold.TLabel")
 clock_label.pack(side="right", padx=(12, 0))
-date_label = ttk.Label(toolbar, text="", style="Muted.TLabel")
+date_label = ttk.Label(right_box, text="", style="Muted.TLabel")
 date_label.pack(side="right", padx=(12, 0))
 
-nav_box = ttk.Frame(toolbar)
+nav_box = ttk.Frame(right_box)
 nav_box.pack(side="right", padx=(0, 12))
 prev_button = ttk.Button(nav_box, text="◀", width=3)
 prev_button.pack(side="left")
@@ -307,6 +347,7 @@ playing_key = None     # channel key currently playing
 player_process = None  # subprocess of the running mpv
 popup = None           # program details Toplevel
 server_ok = False      # last EPG request succeeded
+all_channels = None    # full channel list, fetched once
 
 
 # ------------------------------------------------------------- helpers ---
@@ -350,17 +391,20 @@ def rebuild_rows(keys):
 
         progs = ttk.Frame(scroll_frame)
         gridrows[key] = SimpleNamespace(chan=chan, progs=progs, number=number,
-                                        name=name, uuid=None)
+                                        name=name, uuid=None, has_epg=False)
 
 
 def apply_filter(reset_scroll=False):
     global selected_key
     query = search_var.get().strip().lower()
+    epg_only = epg_only_var.get()
     visible_keys.clear()
     index = 0
 
     for key, row in gridrows.items():
-        matches = not query or query in f"{row.number} {row.name}".lower()
+        matches = (not query or query in f"{row.number} {row.name}".lower())
+        if epg_only and not row.has_epg:
+            matches = False
         if matches:
             row.chan.grid(row=index, column=0, sticky="nsew")
             row.progs.grid(row=index, column=1, sticky="nsew")
@@ -420,7 +464,7 @@ def update_nowline():
 
 
 def update_epg_grid():
-    global server_ok
+    global server_ok, all_channels
     try:
         epg = get_epg_data(view_start, view_end)
     except TVHCError as err:
@@ -430,16 +474,31 @@ def update_epg_grid():
     server_ok = True
     show_connection("Connected")
 
-    keys = list(epg)
+    # the channel list is optional: if the request fails, fall back to
+    # showing only the channels that appear in the EPG
+    if all_channels is None:
+        try:
+            all_channels = get_channels()
+        except TVHCError:
+            all_channels = None
+
+    channel_keys = set(epg)
+    if all_channels:
+        channel_keys.update(all_channels)
+    keys = sorted(channel_keys, key=lambda key: channel_sort_key((key, None)))
+
     if set(keys) != set(gridrows):
         rebuild_rows(keys)
 
-    for key, events in epg.items():
+    for key in keys:
         row = gridrows.get(key)
         if row is None:
             continue
+        events = epg.get(key, [])
+        row.has_epg = bool(events)
+        row.uuid = all_channels.get(key) if all_channels else None
         if events and events[0].get('channelUuid'):
-            row.uuid = events[0]['channelUuid']
+            row.uuid = events[0]['channelUuid'] or row.uuid
 
         for child in row.progs.winfo_children():
             child.destroy()
@@ -447,6 +506,16 @@ def update_epg_grid():
         col = 0
         group = f'progs-{key}'
         pos = view_start
+
+        if not events:
+            empty = ttk.Label(row.progs, text="No program data",
+                              borderwidth=1, relief="solid",
+                              style="Empty.TLabel", cursor="hand2")
+            empty.metadata = SimpleNamespace(key=key)
+            empty.bind("<Button-1>", play_stop)
+            empty.grid(row=0, column=0, sticky="nsew")
+            row.progs.columnconfigure(0, weight=1, uniform=group)
+            continue
 
         for event in events:
             title = clean_text(event.get('title'), '(no title)')
@@ -621,6 +690,9 @@ def play_stop(event):
     global selected_key
     selected_key = metadata.key
     refresh_row_styles()
+    # take keyboard focus back from the search box so the arrow keys and
+    # Enter act on the guide after a click
+    root.focus_set()
     title = getattr(metadata, 'title', None)
     # clicking a program of the channel that is already playing should not
     # stop playback; only the channel label acts as a play/stop toggle.
@@ -806,6 +878,7 @@ def on_close():
 
 search_var.trace_add("write", lambda *args: apply_filter(reset_scroll=True))
 search_entry.bind("<Escape>", on_key_escape)
+epg_only_check.configure(command=lambda: apply_filter(reset_scroll=True))
 
 prev_button.configure(command=lambda: page_view(-SLOT_SECONDS))
 next_button.configure(command=lambda: page_view(SLOT_SECONDS))

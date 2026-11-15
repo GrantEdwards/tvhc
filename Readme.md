@@ -92,6 +92,7 @@ python3 tvhc.py http://192.168.1.45:9981/
 | Move the guide back / forward | <kbd>◀</kbd> / <kbd>▶</kbd> buttons or <kbd>←</kbd> / <kbd>→</kbd> (30 minutes at a time) |
 | Return to the current time | **Now** button |
 | Filter channels | Type a channel number or name in **Search** |
+| Show only channels with program data | Tick **Only channels with EPG** |
 | Clear the filter | <kbd>Esc</kbd> or **Clear** |
 | Close program details | **Close** or <kbd>Esc</kbd> |
 
@@ -112,6 +113,11 @@ The playing channel is highlighted and the status bar shows what is playing;
 The grid shows the next three hours of programming for every channel, in
 half-hour slots starting half an hour before the current time. Clicking any
 program in a row plays that channel live — it does not play a recording.
+
+By default every channel on the server is listed, including channels that
+have no EPG data. Those rows show **No program data** and can still be played
+by clicking them. Tick **Only channels with EPG** to hide channels that have
+no programs in the visible time window.
 
 While you are on the current time window the guide advances automatically. If
 you move it with <kbd>◀</kbd> / <kbd>▶</kbd>, it stays where you put it until
