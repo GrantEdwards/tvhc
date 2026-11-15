@@ -239,7 +239,7 @@ def update_epg_grid():
         tt = gridstart  # where we are in the timeline between grid start/end
 
         for e in events:
-            title = e['title']
+            title = e.get('title') or '(no title)'
             start = e['start']
             stop =  e['stop']
 
@@ -272,7 +272,12 @@ def update_epg_grid():
             label.bind('<Button-1>', play_stop)
             label.bind("<Button-3>", program_popup)
             label.grid(row=0,column=col,sticky="nsew")
-            row.progs.columnconfigure(col, weight=duration, uniform=proggrp)
+            # grid uniform groups size columns proportionally to
+            # weight/requested width, so a very short program with a
+            # long title can inflate the whole row (and the window)
+            # to tens of thousands of pixels, which X rejects with
+            # BadAlloc.  Give short programs a floor weight.
+            row.progs.columnconfigure(col, weight=max(duration,300), uniform=proggrp)
             tt += duration
             col += 1
 
