@@ -537,12 +537,22 @@ def update_epg_grid():
                 continue
 
             display_title = title if len(title) <= 55 else title[:52].rstrip() + '…'
+            description = clean_text(event.get('description'))
+            subtitle = clean_text(event.get('subtitle'))
+            if description:
+                body = description
+                subtitle_line = subtitle
+            else:
+                # some EPG sources put the long description in subtitle
+                body = subtitle
+                subtitle_line = ''
             label = ttk.Label(row.progs, text=display_title, borderwidth=1,
                               relief="solid", style="Prog.TLabel", cursor="hand2")
             label.metadata = SimpleNamespace(
                 key=key,
                 title=title,
-                description=clean_text(event.get('description'), 'No description available.'),
+                subtitle=subtitle_line,
+                description=body or 'No description available.',
                 start=event['start'],
                 stop=event['stop'],
             )
@@ -762,6 +772,11 @@ def program_popup(event):
     ttk.Label(frame, text=channel, style="Muted.TLabel").pack(anchor="w")
     ttk.Label(frame, text=metadata.title, style="Title.TLabel",
               wraplength=440, justify="left").pack(anchor="w", pady=(4, 8))
+
+    subtitle = getattr(metadata, 'subtitle', '')
+    if subtitle:
+        ttk.Label(frame, text=subtitle, style="Muted.TLabel",
+                  wraplength=440, justify="left").pack(anchor="w", pady=(0, 8))
 
     length = round((metadata.stop - metadata.start) / 60)
     ttk.Label(frame, text=f"{thm(metadata.start)} – {thm(metadata.stop)}  ·  {length} min",
