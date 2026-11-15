@@ -239,7 +239,7 @@ def update_epg_grid():
         tt = gridstart  # where we are in the timeline between grid start/end
 
         for e in events:
-            title = e['title']
+            title = e.get('title') or '(no title)'
             start = e['start']
             stop =  e['stop']
 
