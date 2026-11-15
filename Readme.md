@@ -84,7 +84,7 @@ python3 tvhc.py http://192.168.1.45:9981/
 | Action | How |
 | --- | --- |
 | Play a channel | Click its name, or click any program in its row |
-| Stop playback | Click the playing channel again |
+| Stop playback | Click the playing channel again (mpv stays open, idle) |
 | Program details | Right-click a program |
 | Select a channel | <kbd>↑</kbd> / <kbd>↓</kbd> |
 | Play/stop selected channel | <kbd>Enter</kbd> |
@@ -105,8 +105,9 @@ server cannot be reached, it retries every minute.
 
 ![A channel playing](assets/playing.png)
 
-The playing channel is highlighted and the status bar shows what is playing;
-`mpv` opens in its own window.
+The playing channel is highlighted and the status bar shows what is playing.
+`mpv` opens once in its own window and switches channels in place; it closes
+when you quit tvhc.
 
 ## Program guide
 

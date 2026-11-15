@@ -8,10 +8,13 @@ A small Tkinter client that shows an EPG grid and plays channels with mpv.
 import collections
 import configparser
 import html
+import json
 import os
 import signal
+import socket
 import subprocess
 import sys
+import tempfile
 import time
 from types import SimpleNamespace
 
@@ -91,6 +94,80 @@ SLOT_SECONDS = 30 * 60
 MIN_COL_WEIGHT = 300
 
 
+MPV_SOCKET = os.path.join(tempfile.gettempdir(), f'tvhc-mpv-{os.getpid()}.sock')
+
+
+def mpv_command(payload):
+    """Send one JSON command to the running mpv and consume its reply."""
+    if not os.path.exists(MPV_SOCKET):
+        raise OSError('mpv IPC socket is not available')
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.settimeout(5)
+    try:
+        sock.connect(MPV_SOCKET)
+        payload = dict(payload, request_id=0)
+        sock.sendall((json.dumps(payload) + '\n').encode('utf-8'))
+        # each command produces exactly one newline-terminated reply
+        reply = b''
+        while not reply.endswith(b'\n'):
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            reply += chunk
+    finally:
+        sock.close()
+
+
+def kill_player():
+    """Stop the mpv process and clean up its IPC socket, if any."""
+    global player_process
+    process = player_process
+    player_process = None
+    if process is not None and process.poll() is None:
+        process.terminate()
+        try:
+            process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+    if os.path.exists(MPV_SOCKET):
+        try:
+            os.unlink(MPV_SOCKET)
+        except OSError:
+            pass
+
+
+def ensure_player():
+    """Start the single persistent mpv, if it is not already running."""
+    global player_process
+    if player_process is not None and player_process.poll() is None:
+        return player_process
+
+    if os.path.exists(MPV_SOCKET):
+        try:
+            os.unlink(MPV_SOCKET)
+        except OSError:
+            pass
+
+    player_process = subprocess.Popen(
+        ['mpv', '--quiet', '--idle=yes', f'--input-ipc-server={MPV_SOCKET}'])
+
+    # mpv creates its IPC socket shortly after startup
+    deadline = time.time() + 2
+    while not os.path.exists(MPV_SOCKET):
+        if player_process.poll() is not None:
+            kill_player()
+            raise OSError('mpv exited before creating its IPC socket')
+        if time.time() > deadline:
+            break
+        time.sleep(0.02)
+
+    if not os.path.exists(MPV_SOCKET):
+        kill_player()
+        raise OSError('mpv did not create its IPC socket in time')
+    return player_process
+
+
 def start_player(uuid, title):
     response = requests_get(f'{TVHE_Server}/play/ticket/stream/channel/{uuid}',
                             headers={'User-Agent': 'ticket-please'})
@@ -98,8 +175,20 @@ def start_player(uuid, title):
             if (line and not line.startswith('#'))]
     if not urls:
         raise TVHCError('the server did not return a stream URL')
-    print(f'starting player for {urls}')
-    return subprocess.Popen(['mpv', '--quiet', f'--title={title}'] + urls)
+
+    try:
+        mpv_command({'command': ['set_property', 'title', title]})
+    except OSError:
+        # the player is gone — spawn a fresh one and retry
+        kill_player()
+        ensure_player()
+        mpv_command({'command': ['set_property', 'title', title]})
+
+    print(f'playing {urls} in mpv')
+    mpv_command({'command': ['loadfile', urls[0], 'replace']})
+    for url in urls[1:]:
+        mpv_command({'command': ['loadfile', url, 'append-play']})
+    return player_process
 
 
 def channel_sort_key(item):
@@ -344,7 +433,7 @@ gridrows = {}          # channel key -> row widgets/metadata
 visible_keys = []      # channel keys currently shown (after filtering)
 selected_key = None    # keyboard selection
 playing_key = None     # channel key currently playing
-player_process = None  # subprocess of the running mpv
+player_process = None  # the single persistent mpv process
 popup = None           # program details Toplevel
 server_ok = False      # last EPG request succeeded
 all_channels = None    # full channel list, fetched once
@@ -645,16 +734,12 @@ def set_playing(key):
 
 
 def stop_playback():
-    global player_process, playing_key
-    process = player_process
-    player_process = None
-    if process is not None and process.poll() is None:
-        process.terminate()
+    global playing_key
+    if player_process is not None and player_process.poll() is None:
         try:
-            process.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait()
+            mpv_command({'command': ['stop']})
+        except OSError:
+            kill_player()
 
     if playing_key is not None:
         playing_key = None
@@ -887,7 +972,12 @@ def on_canvas_configure(event):
 
 
 def on_close():
-    stop_playback()
+    if player_process is not None and player_process.poll() is None:
+        try:
+            mpv_command({'command': ['quit']})
+        except OSError:
+            pass
+    kill_player()
     root.destroy()
 
 
